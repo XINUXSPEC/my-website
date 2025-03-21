@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF 阅读器</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- 使用更可靠的CDN或直接从PDF.js官方网站下载 -->
+    <script src="https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.min.js"></script>
+    <script src="https://lf-cdn.coze.cn/obj/unpkg/flow-platform/chat-app-sdk/1.2.0-beta.5/libs/cn/index.js"></script>
+    <style>
+        /* 基本样式 */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f4f8; /* 添加背景颜色 */
+        }
+        
+        /* 优化PDF容器样式 */
+        #pdf-container {
+            width: 100%;
+            height: 90vh; /* 将高度调整为90vh */
+            border: 1px solid #ccc;
+            overflow: auto;
+            background-color: #ffffff; /* PDF容器背景颜色 */
+            position: relative;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2); /* 添加阴影效果 */
+            border-radius: 8px; /* 圆角效果 */
+            padding: 20px; /* 增加内边距 */
+        }
+        
+        .pdf-page {
+            position: relative;
+            margin: 10px auto;
+            background-color: white;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        
+        /* 浮动按钮 */
+        #floatingSendButton {
+            position: fixed;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 15px;
+            cursor: pointer;
+            display: none;
+            z-index: 2000;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        
+        /* 聊天图标 */
+        #chatBubble {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 50px;
+            height: 50px;
+            background-color: #007bff;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            z-index: 1000;
+        }
+        
+        
+        /* 添加复制成功弹窗样式 */
+        #copyNotification {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 8px;
+            font-size: 18px;
+            z-index: 3000;
+            display: none;
+        }
+        
+        /* 键盘快捷键提示 */
+        .shortcut-tip {
+            margin-top: 5px;
+            font-size: 12px;
+            color: #666;
+        }
+        
+        /* 更新浮动按钮样式 */
+        #floatingSendButton {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+        }
+        
+        /* 添加动画 */
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        
+        .pulse {
+            animation: pulse 0.5s;
+        }
+        
+        /* 添加文本层样式 */
+        .textLayer {
+            position: absolute;
+            left: 0;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            overflow: hidden;
+            opacity: 0.2;
+            line-height: 1.0;
+        }
+        
+        .textLayer > span {
+            color: transparent;
+            position: absolute;
+            white-space: pre;
+            cursor: text;
+            transform-origin: 0% 0%;
+        }
+        
+        .textLayer .highlight {
+            margin: -1px;
+            padding: 1px;
+            background-color: rgba(180, 0, 170, 0.2);
+            border-radius: 4px;
+        }
+        
+        .textLayer .highlight.begin {
+            border-radius: 4px 0px 0px 4px;
+        }
+        
+        .textLayer .highlight.end {
+            border-radius: 0px 4px 4px 0px;
+        }
+        
+        .textLayer .highlight.middle {
+            border-radius: 0px;
+        }
+        
+        .textLayer .highlight.selected {
+            background-color: rgba(0, 100, 0, 0.2);
+        }
+        
+        /* 隐藏可能的额外图层 */
+        canvas + canvas {
+            display: none;
+        }
+        
+        /* 优化按钮样式 */
+        button {
+            transition: background-color 0.3s, transform 0.2s; /* 添加过渡效果 */
+        }
+        
+        button:hover {
+            background-color: #0056b3; /* 悬停时的背景颜色 */
+            transform: scale(1.05); /* 悬停时的缩放效果 */
+        }
+        
+        /* 修改 iframe 的样式 */
+        #pdf-iframe {
+            width: 100%;
+            height: 100%; /* 将高度调整为100%以填满容器 */
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>PDF 阅读器</h1>
+    </header>
+    
+    <main>
+        <div class="upload-section">
+            <input type="file" id="file-input" accept="application/pdf">
+            <button id="clear-button">清除 PDF</button>
+        </div>
+        
+        <!-- PDF容器 -->
+        <div id="pdf-container">
+            <iframe id="pdf-iframe" type="application/pdf" width="100%" height="90vh" style="display:none;"></iframe>
+        </div>
+    </main>
+    
+    <footer>
+        <p>© 2023 PDF 阅读器. 版权所有.</p>
+    </footer>
+
+    <!-- 聊天图标 -->
+    <!-- <div id="chatBubble">💬</div> -->
+    
+    <!-- 复制成功通知 -->
+    <div id="copyNotification">
+        <div style="text-align:center">
+            <div>✓ 文本已复制到剪贴板</div>
+            <div style="margin-top:10px;font-size:14px">Coze窗口已打开，请按Ctrl+V粘贴</div>
+        </div>
+    </div>
+
+    <div style="text-align:center; margin-top:20px;">
+        <!-- <button id="clipboardPasteButton" style="padding:10px 20px; background-color:#28a745; color:white; border:none; border-radius:5px; cursor:pointer; font-size:16px;">自动粘贴到Coze (Alt+V)</button> -->
+    </div>
+
+    <!-- 浮动发送按钮 -->
+    <!-- <button id="floatingSendButton"><span>复制并发送</span> <span style="font-size:0.8em">(Alt+C)</span></button> -->
+
+    <script>
+        // 全局变量
+        let cozeClient = null;
+        let pdfDoc = null;
+        let currentPage = 1;
+        let pageCount = 0;
+        let pageRendering = false;
+        let pageNumPending = null;
+        let scale = 1.8;
+        let currentSelectedText = '';
+        
+        // 设置PDF.js工作路径 - 使用与主库相同的CDN
+        pdfjsLib = window['pdfjs-dist/build/pdf'];
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.worker.min.js';
+        
+        // 初始化Coze客户端
+        function initCoze() {
+            try {
+                console.log("初始化Coze SDK...");
+                
+                let client = new CozeWebSDK.WebChatClient({
+                    config: {
+                        bot_id: '7479515921476829234',
+                    },
+                    componentProps: {
+                        title: 'Coze',
+                    },
+                    auth: {
+                        type: 'token',
+                        token: 'pat_TCtGPcd233EJ6fVyA5oz6dyZTaEWdkoL5aLlHtEsWhOpt3JNIW1LgKHuH0LxLtZ9',
+                        onRefreshToken: function () {
+                            return 'pat_TCtGPcd233EJ6fVyA5oz6dyZTaEWdkoL5aLlHtEsWhOpt3JNIW1LgKHuH0LxLtZ9'
+                        }
+                    }
+                });
+                
+                return client;
+            } catch (error) {
+                console.error("初始化Coze SDK失败:", error);
+                return null;
+            }
+        }
+        
+        // 加载PDF文件 
+        function loadPdf(file) {
+            const fileReader = new FileReader();
+            
+            fileReader.onload = function() {
+                const typedarray = new Uint8Array(this.result);
+                
+                // 使用PDF.js加载PDF文件
+                pdfjsLib.getDocument(typedarray).promise.then(function(pdf) {
+                    pdfDoc = pdf;
+                    pageCount = pdf.numPages;
+                    console.log(`PDF已加载，共${pageCount}页`);
+                    
+                    // 清空PDF容器
+                    document.getElementById('pdf-container').innerHTML = '';
+                    
+                    // 渲染前10页或所有页面（如果总页数小于10）
+                    const pagesToRender = Math.min(pageCount, 10);
+                    for (let i = 1; i <= pagesToRender; i++) {
+                        renderPage(i);
+                    }
+                    
+                    // 如果页数超过10页，显示加载更多按钮
+                    if (pageCount > 10) {
+                        const loadMoreBtn = document.createElement('button');
+                        loadMoreBtn.textContent = '加载更多页面';
+                        loadMoreBtn.style.display = 'block';
+                        loadMoreBtn.style.margin = '10px auto';
+                        loadMoreBtn.style.padding = '8px 15px';
+                        loadMoreBtn.onclick = function() {
+                            const nextBatch = Math.min(pageCount - pagesToRender, 5);
+                            for (let i = pagesToRender + 1; i <= pagesToRender + nextBatch; i++) {
+                                renderPage(i);
+                            }
+                            if (pagesToRender + nextBatch >= pageCount) {
+                                loadMoreBtn.style.display = 'none';
+                            }
+                        };
+                        document.getElementById('pdf-container').appendChild(loadMoreBtn);
+                    }
+                }).catch(function(error) {
+                    console.error("加载PDF失败:", error);
+                    alert("加载PDF失败: " + error.message);
+                });
+            };
+            
+            fileReader.readAsArrayBuffer(file);
+        }
+        
+        // 渲染单个页面
+        function renderPage(pageNumber) {
+            pageRendering = true;
+            
+            pdfDoc.getPage(pageNumber).then(function(page) {
+                const viewport = page.getViewport({ scale: scale });
+                
+                // 创建页面容器
+                const pageContainer = document.createElement('div');
+                pageContainer.className = 'pdf-page';
+                pageContainer.style.width = `${viewport.width}px`;
+                pageContainer.style.height = `${viewport.height}px`;
+                pageContainer.setAttribute('data-page-number', pageNumber);
+                
+                document.getElementById('pdf-container').appendChild(pageContainer);
+                
+                // 创建画布 - 只创建一个画布
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                pageContainer.appendChild(canvas);
+                
+                // 清晰定义文本层，使用官方推荐的样式
+                const textLayerDiv = document.createElement('div');
+                textLayerDiv.className = 'textLayer';
+                textLayerDiv.style.width = `${viewport.width}px`;
+                textLayerDiv.style.height = `${viewport.height}px`;
+                pageContainer.appendChild(textLayerDiv);
+                
+                // 渲染PDF页面到画布
+                const renderContext = {
+                    canvasContext: context,
+                    viewport: viewport
+                };
+                
+                // 首先只渲染图像层
+                page.render(renderContext).promise.then(function() {
+                    // 然后单独处理文本层，避免重叠问题
+                    return page.getTextContent();
+                }).then(function(textContent) {
+                    // 清空之前可能存在的文本层内容
+                    textLayerDiv.innerHTML = '';
+                    
+                    // 创建文本项
+                    textContent.items.forEach(function(item) {
+                        const tx = PDFJS_transformTextItem(item, viewport);
+                        if (!tx) return;
+                        
+                        const textSpan = document.createElement('span');
+                        textSpan.textContent = item.str;
+                        
+                        // 使用精确定位
+                        textSpan.style.left = `${tx.left}px`;
+                        textSpan.style.top = `${tx.top}px`;
+                        textSpan.style.fontSize = `${tx.fontSize}px`;
+                        textSpan.style.fontFamily = tx.fontFamily || 'sans-serif';
+                        textSpan.style.transform = `scale(${viewport.scale}) rotate(${item.transform[2]}deg)`;
+                        textSpan.style.position = 'absolute';
+                        textSpan.dataset.angle = tx.angle || 0;
+                        
+                        textLayerDiv.appendChild(textSpan);
+                    });
+                    
+                    // 文本层加载完成标记
+                    pageRendering = false;
+                    if (pageNumPending !== null) {
+                        renderPage(pageNumPending);
+                        pageNumPending = null;
+                    }
+                }).catch(function(err) {
+                    console.error("渲染页面失败:", err);
+                    pageRendering = false;
+                });
+            });
+        }
+        
+        // 辅助函数：转换文本项为正确的定位信息
+        function PDFJS_transformTextItem(item, viewport) {
+            if (!item.transform) return null;
+            
+            // PDF坐标系转换
+            const tx = pdfjsLib.Util.transform(
+                viewport.transform,
+                [
+                    item.transform[0],
+                    item.transform[1],
+                    item.transform[2],
+                    item.transform[3],
+                    item.transform[4],
+                    item.transform[5]
+                ]
+            );
+            
+            // 基本样式信息
+            let style = {
+                left: Math.round(tx[4] * viewport.scale),
+                top: Math.round((viewport.height - tx[5]) * viewport.scale),
+                fontSize: Math.round(tx[0] || 0),
+                fontFamily: item.fontName || 'sans-serif',
+                scaleX: Math.abs(tx[0]) / (item.fontSize || 1)
+            };
+            
+            // 计算角度（如果有旋转）
+            const angle = Math.atan2(tx[1], tx[0]);
+            if (angle) {
+                style.angle = angle * (180 / Math.PI);
+            }
+            
+            return style;
+        }
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 检查PDF.js是否加载
+            if (typeof pdfjsLib === 'undefined') {
+                alert('PDF.js库未能正确加载，请检查网络连接并刷新页面。');
+                return;
+            }
+            
+            // 初始化Coze
+            cozeClient = initCoze();
+            
+            // 文件输入监听
+            document.getElementById('file-input').addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file && file.type === 'application/pdf') {
+                    const url = URL.createObjectURL(file);
+                    document.getElementById('pdf-iframe').src = url;
+                    document.getElementById('pdf-iframe').style.display = 'block'; // 显示 PDF
+                } else {
+                    alert('请上传有效的 PDF 文件。');
+                }
+            });
+            
+            // 清除按钮
+            document.getElementById('clear-button').addEventListener('click', function() {
+                document.getElementById('pdf-iframe').removeAttribute('src');
+                document.getElementById('pdf-iframe').style.display = 'none'; // 隐藏 PDF
+                document.getElementById('selectedTextArea').value = '';
+                currentSelectedText = '';
+                pdfDoc = null;
+            });
+            
+            // 发送按钮
+            document.getElementById('sendToCozeButton').addEventListener('click', function() {
+                const text = document.getElementById('selectedTextArea').value.trim();
+                if (text) {
+                    sendToCoze(text);
+                } else {
+                    alert('请先选择文本');
+                }
+            });
+            
+            // 监听选择事件
+            document.addEventListener('mouseup', handleTextSelection);
+            
+            // 添加键盘快捷键
+            document.addEventListener('keydown', function(e) {
+                // Alt+C 快捷键
+                if (e.altKey && e.key === 'c') {
+                    const text = currentSelectedText || document.getElementById('selectedTextArea').value.trim();
+                    if (text) {
+                        sendToCoze(text);
+                        e.preventDefault(); // 防止默认行为
+                    }
+                }
+            });
+        });
+        
+        // 处理文本选择
+        function handleTextSelection() {
+            const selection = window.getSelection();
+            const text = selection.toString().trim();
+            
+            if (text) {
+                currentSelectedText = text;
+                document.getElementById('selectedTextArea').value = text;
+                
+                // 显示浮动按钮
+                const range = selection.getRangeAt(0);
+                const rect = range.getBoundingClientRect();
+                const button = document.getElementById('floatingSendButton');
+                
+                button.style.left = `${rect.right + window.scrollX}px`;
+                button.style.top = `${rect.top + window.scrollY}px`;
+                button.style.display = 'block';
+            } else {
+                hideFloatingSendButton();
+            }
+        }
+        
+        // 隐藏浮动按钮
+        function hideFloatingSendButton() {
+            document.getElementById('floatingSendButton').style.display = 'none';
+        }
+        
+        // 尝试打开Coze窗口
+        function tryOpenCozeWindow() {
+            if (!cozeClient) return;
+            
+            try {
+                if (typeof cozeClient.openChatWindow === 'function') {
+                    cozeClient.openChatWindow();
+                } else if (typeof cozeClient.toggleChatbox === 'function') {
+                    cozeClient.toggleChatbox(true);
+                } else if (typeof cozeClient.open === 'function') {
+                    cozeClient.open();
+                }
+            } catch (error) {
+                console.error("打开Coze窗口失败:", error);
+            }
+        }
+        
+        // 找到Coze的聊天界面元素
+        function findCozeElements() {
+            // 查找所有可能的输入框
+            const possibleInputSelectors = [
+                'textarea.coze-chat-input', 
+                'div.coze-chat-input',
+                'textarea[placeholder*="发送"]',
+                'input[placeholder*="发送"]',
+                'textarea',
+                'div[contenteditable="true"]'
+            ];
+            
+            let inputElement = null;
+            
+            // 尝试不同的选择器
+            for (let selector of possibleInputSelectors) {
+                const elements = document.querySelectorAll(selector);
+                for (let element of elements) {
+                    // 检查元素是否可见
+                    if (element.offsetParent !== null) {
+                        inputElement = element;
+                        console.log("找到Coze输入框:", element);
+                        break;
+                    }
+                }
+                if (inputElement) break;
+            }
+            
+            // 查找发送按钮
+            const possibleButtonSelectors = [
+                'button.coze-send-button',
+                'button[aria-label*="发送"]',
+                'button:has(svg)', // 通常发送按钮包含一个SVG图标
+                'button.send'
+            ];
+            
+            let sendButton = null;
+            
+            for (let selector of possibleButtonSelectors) {
+                const elements = document.querySelectorAll(selector);
+                for (let element of elements) {
+                    // 检查元素是否可见
+                    if (element.offsetParent !== null) {
+                        sendButton = element;
+                        console.log("找到Coze发送按钮:", element);
+                        break;
+                    }
+                }
+                if (sendButton) break;
+            }
+            
+            return { inputElement, sendButton };
+        }
+        
+        // 填充输入框
+        function fillInputElement(element, text) {
+            if (!element) return false;
+            
+            try {
+                // 根据元素类型设置内容
+                if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+                    element.value = text;
+                    // 触发input事件以激活发送按钮
+                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                    return true;
+                } else if (element.getAttribute('contenteditable') === 'true') {
+                    element.innerHTML = text;
+                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                    return true;
+                }
+            } catch (error) {
+                console.error("填充输入框失败:", error);
+            }
+            
+            return false;
+        }
+        
+        // 修改sendToCoze函数为用户友好的复制+打开方式
+        function sendToCoze(text) {
+            console.log("准备发送文本:", text);
+            
+            // 打开Coze窗口
+            tryOpenCozeWindow();
+            
+            // 复制到剪贴板并显示友好通知
+            navigator.clipboard.writeText(text).then(function() {
+                // 显示复制成功通知
+                const notification = document.getElementById('copyNotification');
+                notification.style.display = 'block';
+                notification.classList.add('pulse');
+                
+                // 3秒后隐藏通知
+                setTimeout(function() {
+                    notification.style.display = 'none';
+                    notification.classList.remove('pulse');
+                }, 3000);
+                
+                // 聚焦到Coze窗口 (尝试几次，因为窗口打开可能有延迟)
+                focusChatWindow();
+            }).catch(function(err) {
+                console.error("复制到剪贴板失败:", err);
+                alert("无法复制文本。请手动复制: " + text);
+            });
+        }
+        
+        // 尝试聚焦到Coze聊天窗口
+        function focusChatWindow() {
+            // 多次尝试聚焦，因为窗口打开有延迟
+            setTimeout(() => focusCozeElement(), 500);
+            setTimeout(() => focusCozeElement(), 1000);
+            setTimeout(() => focusCozeElement(), 2000);
+        }
+        
+        // 聚焦Coze元素
+        function focusCozeElement() {
+            try {
+                // 尝试找到输入框并聚焦
+                const { inputElement } = findCozeElements();
+                if (inputElement) {
+                    inputElement.focus();
+                    console.log("已聚焦到Coze输入框");
+                }
+            } catch (e) {
+                console.log("聚焦尝试失败", e);
+            }
+        }
+    </script>
+</body>
+</html>
